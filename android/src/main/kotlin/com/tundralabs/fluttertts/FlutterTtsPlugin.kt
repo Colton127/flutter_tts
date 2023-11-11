@@ -178,10 +178,16 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         handler!!.post { speakResult?.success(success) }
     }
 
+
+
     fun synthCompletion(success: Int) {
-        synth = false
-        handler!!.post { synthResult?.success(success) }
+    synth = false
+    handler!!.post { 
+        synthResult?.success(success) // Send the completion result
+        synthResult = null // Reset synthResult to null
     }
+}
+
 
     private val onInitListener: TextToSpeech.OnInitListener =
         TextToSpeech.OnInitListener { status ->
@@ -307,22 +313,30 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 result.success(res)
             }
 
-            "synthesizeToFile" -> {
-                val text: String? = call.argument("text")
-                if (synth) {
-                    result.success(0)
-                    return
-                }
-                val fileName: String? = call.argument("fileName")
-                synthesizeToFile(text!!, fileName!!)
-                if (awaitSynthCompletion) {
-                    synth = true
-                    synthResult = result
-                } else {
-                    result.success(1)
-                }
-            }
+"synthesizeToFile" -> {
+    val text: String? = call.argument("text")
+    val fileName: String? = call.argument("fileName")
 
+    if (synth || text == null || fileName == null) {
+        result.success(0)
+        return    
+        }
+    synth = true
+    synthesizeToFile(text, fileName)
+    // Set the synth flag and store the result reference
+    if (synthResult != null) {
+        // If there's a pending result, notify that a new synthesis request has started
+        synthResult!!.error("Error", "New synthesis request started", null)
+    }
+    synthResult = result
+
+    // Decide whether to wait for synthesis completion based on 'awaitSynthCompletion'
+    if (!awaitSynthCompletion) {
+        result.success(1)
+        synth = false
+        synthResult = null
+    }
+}
             "pause" -> {
                 isPaused = true
                 if (pauseText != null) {
