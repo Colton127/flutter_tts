@@ -362,10 +362,15 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 }
             }
 
-            "setEngine" -> {
-                val engine: String = call.arguments.toString()
-                setEngine(engine, result)
-            }
+"setEngine" -> {
+    val engine: String = call.arguments.toString()
+
+    synchronized(this@FlutterTtsPlugin) {
+        // Ensure that the operation on the shared resource is thread-safe
+        setEngine(engine, result)
+    }
+}
+
 
             "setSpeechRate" -> {
                 val rate: String = call.arguments.toString()
