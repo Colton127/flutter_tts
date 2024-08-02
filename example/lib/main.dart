@@ -1,9 +1,22 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:math';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+class TTSVoice {
+  final String locale;
+  final String name;
+  TTSVoice(this.locale, this.name);
+
+  @override
+  String toString() => 'TTSVoice{locale: $locale, name: $name}';
+}
 
 void main() => runApp(MyApp());
 
@@ -15,7 +28,12 @@ class MyApp extends StatefulWidget {
 enum TtsState { playing, stopped, paused, continued }
 
 class _MyAppState extends State<MyApp> {
+  final r = Random();
+  late final List<TTSVoice> ttsVoices;
   late FlutterTts flutterTts;
+  final audioPlayer = AudioPlayer();
+  late String ttsSynthOutput;
+  final String ttsSynthOutputFileName = 'tts.caf';
   String? language;
   String? engine;
   double volume = 0.5;
@@ -23,7 +41,8 @@ class _MyAppState extends State<MyApp> {
   double rate = 0.5;
   bool isCurrentLanguageInstalled = false;
 
-  String? _newVoiceText;
+  String? _newVoiceText = 'Hello, how are you? I am Flutter TTS. I am a text-to-speech plugin for Flutter. I support Web, Android, iOS, and Windows.';
+  late final _textController = TextEditingController(text: _newVoiceText);
   int? _inputLength;
 
   TtsState ttsState = TtsState.stopped;
@@ -38,6 +57,27 @@ class _MyAppState extends State<MyApp> {
   bool get isWindows => !kIsWeb && Platform.isWindows;
   bool get isWeb => kIsWeb;
 
+  Future<List<TTSVoice>> getTtsVoiceList() async {
+    final List<TTSVoice> ttsVoiceList = [];
+    final voiceData = await flutterTts.getVoices as List<dynamic>;
+    for (final voice in voiceData) {
+      if (!_isSupportediOSTtsVoice(voice['identifier'] as String?)) continue;
+      final String? locale = voice['locale'] as String?;
+      if (locale != 'en-US') continue;
+      final String? name = voice['name'] as String?;
+      ttsVoiceList.add(TTSVoice(locale!, name!));
+    }
+    print('Loaded ${ttsVoiceList.length} voices');
+    return ttsVoiceList;
+  }
+
+  static bool _isSupportediOSTtsVoice(String? identifier) {
+    if (identifier == null) return true;
+    if (identifier.contains('speech.synthesis')) return false;
+    if (identifier.contains('eloquence')) return false;
+    return true;
+  }
+
   @override
   initState() {
     super.initState();
@@ -48,7 +88,6 @@ class _MyAppState extends State<MyApp> {
     flutterTts = FlutterTts();
 
     _setAwaitOptions();
-
     if (isAndroid) {
       _getDefaultEngine();
       _getDefaultVoice();
@@ -116,29 +155,66 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _speak() async {
-    await flutterTts.setVolume(volume);
-    await flutterTts.setSpeechRate(rate);
-    await flutterTts.setPitch(pitch);
-
-    if (_newVoiceText != null) {
-      if (_newVoiceText!.isNotEmpty) {
-        await flutterTts.speak(_newVoiceText!);
-      }
-    }
+    await _synthesizeToFile(_newVoiceText!);
+    await audioPlayer.setFilePath(ttsSynthOutput);
+    await audioPlayer.play();
   }
 
   Future<void> _setAwaitOptions() async {
+    ttsVoices = await getTtsVoiceList();
+    final appDocDir = await getApplicationDocumentsDirectory();
+    ttsSynthOutput = p.join(appDocDir.path, ttsSynthOutputFileName);
     await flutterTts.awaitSpeakCompletion(true);
+    await flutterTts.awaitSynthCompletion(true);
   }
 
   Future<void> _stop() async {
+    audioPlayer.pause();
     var result = await flutterTts.stop();
     if (result == 1) setState(() => ttsState = TtsState.stopped);
   }
 
   Future<void> _pause() async {
+    audioPlayer.pause();
     var result = await flutterTts.pause();
     if (result == 1) setState(() => ttsState = TtsState.paused);
+  }
+
+  Future<void> _synthesizeToFile(String text) async {
+    await Future.wait([
+      flutterTts.setVolume(volume),
+      flutterTts.setSpeechRate(rate),
+      flutterTts.setPitch(pitch),
+    ]);
+
+    await flutterTts.synthesizeToFile(text, ttsSynthOutputFileName);
+    // await audioPlayer.setFilePath(ttsSynthOutput);
+    // await audioPlayer.play();
+  }
+
+  Future<void> _synthLoop() async {
+    int iterations = 100;
+    final stopwatch = Stopwatch()..start();
+    for (var i = 1; i <= iterations; i++) {
+      int begin = stopwatch.elapsedMilliseconds;
+      final voice = ttsVoices[i % ttsVoices.length];
+      await flutterTts.setVoice({"name": voice.name, "locale": voice.locale});
+      await _synthesizeToFile('h');
+      print('synthLoop i $i / $iterations. Voice: ${voice}. Elapsed: ${stopwatch.elapsedMilliseconds - begin} ms');
+
+      if (i % 10 == 0) {
+        final average = stopwatch.elapsedMilliseconds / i;
+        print('synthLoop i $i. Average: $average ms');
+      }
+    }
+    stopwatch.stop();
+  }
+
+  Future<void> _randomizeVars() async {
+    volume = r.nextDouble().clamp(0.1, 1.0);
+    rate = r.nextDouble().clamp(0.1, 1.0);
+    pitch = r.nextDouble() + 0.5;
+    setState(() {});
   }
 
   @override
@@ -147,12 +223,10 @@ class _MyAppState extends State<MyApp> {
     flutterTts.stop();
   }
 
-  List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(
-      List<dynamic> engines) {
+  List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<dynamic> engines) {
     var items = <DropdownMenuItem<String>>[];
     for (dynamic type in engines) {
-      items.add(DropdownMenuItem(
-          value: type as String?, child: Text((type as String))));
+      items.add(DropdownMenuItem(value: type as String?, child: Text((type as String))));
     }
     return items;
   }
@@ -165,12 +239,10 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  List<DropdownMenuItem<String>> getLanguageDropDownMenuItems(
-      List<dynamic> languages) {
+  List<DropdownMenuItem<String>> getLanguageDropDownMenuItems(List<dynamic> languages) {
     var items = <DropdownMenuItem<String>>[];
     for (dynamic type in languages) {
-      items.add(DropdownMenuItem(
-          value: type as String?, child: Text((type as String))));
+      items.add(DropdownMenuItem(value: type as String?, child: Text((type as String))));
     }
     return items;
   }
@@ -180,9 +252,7 @@ class _MyAppState extends State<MyApp> {
       language = selectedType;
       flutterTts.setLanguage(language!);
       if (isAndroid) {
-        flutterTts
-            .isLanguageInstalled(language!)
-            .then((value) => isCurrentLanguageInstalled = (value as bool));
+        flutterTts.isLanguageInstalled(language!).then((value) => isCurrentLanguageInstalled = (value as bool));
       }
     });
   }
@@ -198,7 +268,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
-          title: Text('Flutter TTS'),
+          title: Text('Flutter TTS - MemleakFix'),
         ),
         body: SingleChildScrollView(
           scrollDirection: Axis.vertical,
@@ -248,6 +318,7 @@ class _MyAppState extends State<MyApp> {
       alignment: Alignment.topCenter,
       padding: EdgeInsets.only(top: 25.0, left: 25.0, right: 25.0),
       child: TextField(
+        controller: _textController,
         maxLines: 11,
         minLines: 6,
         onChanged: (String value) {
@@ -261,12 +332,10 @@ class _MyAppState extends State<MyApp> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _buildButtonColumn(Colors.green, Colors.greenAccent, Icons.play_arrow,
-              'PLAY', _speak),
-          _buildButtonColumn(
-              Colors.red, Colors.redAccent, Icons.stop, 'STOP', _stop),
-          _buildButtonColumn(
-              Colors.blue, Colors.blueAccent, Icons.pause, 'PAUSE', _pause),
+          _buildButtonColumn(Colors.purple, Colors.greenAccent, Icons.refresh, 'LOOP', _synthLoop),
+          _buildButtonColumn(Colors.green, Colors.greenAccent, Icons.play_arrow, 'PLAY', _speak),
+          _buildButtonColumn(Colors.red, Colors.redAccent, Icons.stop, 'STOP', _stop),
+          _buildButtonColumn(Colors.blue, Colors.blueAccent, Icons.pause, 'PAUSE', _pause),
         ],
       ),
     );
@@ -295,25 +364,11 @@ class _MyAppState extends State<MyApp> {
         ),
       ]));
 
-  Column _buildButtonColumn(Color color, Color splashColor, IconData icon,
-      String label, Function func) {
-    return Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-              icon: Icon(icon),
-              color: color,
-              splashColor: splashColor,
-              onPressed: () => func()),
-          Container(
-              margin: const EdgeInsets.only(top: 8.0),
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 12.0,
-                      fontWeight: FontWeight.w400,
-                      color: color)))
-        ]);
+  Column _buildButtonColumn(Color color, Color splashColor, IconData icon, String label, Function func) {
+    return Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+      IconButton(icon: Icon(icon), color: color, splashColor: splashColor, onPressed: () => func()),
+      Container(margin: const EdgeInsets.only(top: 8.0), child: Text(label, style: TextStyle(fontSize: 12.0, fontWeight: FontWeight.w400, color: color)))
+    ]);
   }
 
   Widget _getMaxSpeechInputLengthSection() {
