@@ -657,27 +657,10 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID,
             SYNTHESIZE_TO_FILE_PREFIX + uuid
         )
+        val file = File(fileName)
+        fullPath = file.path
 
-        val result: Int =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val resolver = this.context?.contentResolver
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
-                }
-                val uri = resolver?.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, contentValues)
-                this.parcelFileDescriptor = resolver?.openFileDescriptor(uri!!, "rw")
-                fullPath = uri?.path + File.separatorChar + fileName
-
-                tts!!.synthesizeToFile(text, bundle!!, parcelFileDescriptor!!, SYNTHESIZE_TO_FILE_PREFIX + uuid)
-            } else {
-                val musicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-                val file = File(musicDir, fileName)
-                fullPath = file.path
-
-                tts!!.synthesizeToFile(text, bundle!!, file!!, SYNTHESIZE_TO_FILE_PREFIX + uuid)
-            }
+        val result: Int = tts!!.synthesizeToFile(text, bundle!!, file!!, SYNTHESIZE_TO_FILE_PREFIX + uuid)
 
         if (result == TextToSpeech.SUCCESS) {
             Log.d(tag, "Successfully created file : $fullPath")

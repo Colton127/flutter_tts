@@ -32,7 +32,7 @@ class _MyAppState extends State<MyApp> {
   late final List<TTSVoice> ttsVoices;
   late FlutterTts flutterTts;
   final audioPlayer = AudioPlayer();
-  late String ttsSynthOutput;
+  late String ttsSynthOutputPath;
   final String ttsSynthOutputFileName = 'tts.caf';
   String? language;
   String? engine;
@@ -156,14 +156,14 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _speak() async {
     await _synthesizeToFile(_newVoiceText!);
-    await audioPlayer.setFilePath(ttsSynthOutput);
+    await audioPlayer.setFilePath(ttsSynthOutputPath);
     await audioPlayer.play();
   }
 
   Future<void> _setAwaitOptions() async {
     ttsVoices = await getTtsVoiceList();
     final appDocDir = await getApplicationDocumentsDirectory();
-    ttsSynthOutput = p.join(appDocDir.path, ttsSynthOutputFileName);
+    ttsSynthOutputPath = p.join(appDocDir.path, Platform.isIOS ? 'tts.caf' : 'tts.wav');
     await flutterTts.awaitSpeakCompletion(true);
     await flutterTts.awaitSynthCompletion(true);
   }
@@ -187,7 +187,7 @@ class _MyAppState extends State<MyApp> {
       flutterTts.setPitch(pitch),
     ]);
 
-    await flutterTts.synthesizeToFile(text, ttsSynthOutputFileName);
+    await flutterTts.synthesizeToFile(text, ttsSynthOutputPath);
     // await audioPlayer.setFilePath(ttsSynthOutput);
     // await audioPlayer.play();
   }

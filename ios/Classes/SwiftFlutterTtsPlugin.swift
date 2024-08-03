@@ -186,13 +186,11 @@ public class SwiftFlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizer
               failed = true
               return
           }
-          print(pcmBuffer.format)
           if pcmBuffer.frameLength == 0 {
               // finished
           } else {
             // append buffer to file
-            let fileURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent(fileName)
-            NSLog("Saving utterance to file: \(fileURL.absoluteString)")
+            let fileURL = URL(fileURLWithPath: fileName)
 
           if output == nil {
             do {
