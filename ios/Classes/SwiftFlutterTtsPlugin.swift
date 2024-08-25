@@ -183,7 +183,14 @@ public class SwiftFlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizer
                 }
                 if output == nil {
                     do {
-                        output = try AVAudioFile(forWriting: fileURL, settings: pcmBuffer.format.settings, commonFormat: pcmBuffer.format.commonFormat, interleaved: false)
+                        var bufferFormatSettings = pcmBuffer.format.settings
+                        bufferFormatSettings[AVFormatIDKey] = kAudioFormatLinearPCM
+                        bufferFormatSettings[AVLinearPCMIsBigEndianKey] = false
+                        bufferFormatSettings[AVLinearPCMIsFloatKey] = false
+                        bufferFormatSettings[AVLinearPCMBitDepthKey] = 16
+                        //print("originalBufferFormat: " + pcmBuffer.format.settings.description + "modifiedBufferFormatSettings: " + bufferFormatSettings.description)
+                        output = try AVAudioFile(forWriting: fileURL, settings: bufferFormatSettings, commonFormat: pcmBuffer.format.commonFormat, interleaved: false)
+                        
                     } catch {
                         flutterError = FlutterError(code: "AUDIO_FILE_ERROR", message: "Error creating AVAudioFile", details: error.localizedDescription)
                         return
