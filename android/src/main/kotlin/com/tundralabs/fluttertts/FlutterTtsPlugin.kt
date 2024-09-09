@@ -198,8 +198,12 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     fun synthCompletion(success: Int) {
+        if (!synth) return
         synth = false
-        handler!!.post { synthResult?.success(success) }
+        handler!!.post { 
+            synthResult?.success(success) 
+            synthResult = null
+        }
     }
 
     private val onInitListener: TextToSpeech.OnInitListener =
