@@ -106,6 +106,28 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
          tts = null
     }
 
+    private val onInitListener: TextToSpeech.OnInitListener =
+    TextToSpeech.OnInitListener { status ->
+        // Handle pending method calls (sent while TTS was initializing)
+        synchronized(this@FlutterTtsPlugin) {
+            ttsStatus = status
+            for (call in pendingMethodCalls) {
+                call.run()
+            }
+            pendingMethodCalls.clear()
+        }
+
+        if (status == TextToSpeech.SUCCESS && tts != null) {
+            tts!!.setOnUtteranceProgressListener(utteranceProgressListener)
+            Log.e(tag, "Successfully initialized TextToSpeech with status: $status")
+            engineCompletion(1)
+        } else {
+            val errorMessage = "Failed to initialize TextToSpeech with status: $status"
+            Log.e(tag, errorMessage)
+            engineCompletion(0, errorMessage)
+        }
+    }
+
 
 
     private val utteranceProgressListener: UtteranceProgressListener =
@@ -219,41 +241,21 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             synthResult = null
         }
     }
-
-        
-
-    private val onInitListener: TextToSpeech.OnInitListener =
-        TextToSpeech.OnInitListener { status ->
-            // Handle pending method calls (sent while TTS was initializing)
-            synchronized(this@FlutterTtsPlugin) {
-                ttsStatus = status
-                for (call in pendingMethodCalls) {
-                    call.run()
+    fun engineCompletion(success: Int, error: String? = null) {
+        if (engineResult != null) {
+                if (error != null) { 
+                    engineResult?.error("EngineError", error, null) 
+                } else {
+                    engineResult?.success(success)
                 }
-                pendingMethodCalls.clear()
-            }
-
-            if (status == TextToSpeech.SUCCESS) {
-                tts!!.setOnUtteranceProgressListener(utteranceProgressListener)
-                try {
-                    val locale: Locale = tts!!.defaultVoice.locale
-                    if (isLanguageAvailable(locale)) {
-                        tts!!.language = locale
-                    }
-                } catch (e: NullPointerException) {
-                    Log.e(tag, "getDefaultLocale: " + e.message)
-                } catch (e: IllegalArgumentException) {
-                    Log.e(tag, "getDefaultLocale: " + e.message)
-                }
-                Log.e(tag, "Successfully initialized TextToSpeech")
-                engineResult?.success(1)
-            } else {
-                val errorMessage = "Failed to initialize TextToSpeech with status: $status"
-                Log.e(tag, errorMessage)
-                engineResult?.error("TtsError", errorMessage, null)
-            }
-            engineResult = null
+                engineResult = null
         }
+    }
+    
+
+
+
+
 
 
     override fun onMethodCall(call: MethodCall, result: Result) {
