@@ -55,6 +55,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private var queueMode: Int = TextToSpeech.QUEUE_FLUSH
     private var ttsStatus: Int? = null
     private var engineResult: Result? = null
+    private var isInitializing: Boolean = false
 
 
 
@@ -69,7 +70,6 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         methodChannel!!.setMethodCallHandler(this)
         handler = Handler(Looper.getMainLooper())
         bundle = Bundle()
-        initTextToSpeech()
     }
 
     /** Android Plugin APIs  */
@@ -84,13 +84,16 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         context = null
         methodChannel!!.setMethodCallHandler(null)
         methodChannel = null
+        isInitializing = false
     }
 
     private fun initTextToSpeech() {
+        Log.e(tag, "Initalizing TextToSpeech")
+        isInitializing = true
         if (tts != null) {
            disposeTextToSpeech()
         }
-        tts = if (currentEngine != null) {
+         tts = if (currentEngine != null) {
             TextToSpeech(context, onInitListener, currentEngine)
         } else {
             TextToSpeech(context, onInitListener)
@@ -111,6 +114,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         // Handle pending method calls (sent while TTS was initializing)
         synchronized(this@FlutterTtsPlugin) {
             ttsStatus = status
+            isInitializing = false
             for (call in pendingMethodCalls) {
                 call.run()
             }
@@ -262,6 +266,10 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         // If TTS is still loading
         synchronized(this@FlutterTtsPlugin) {
             if (ttsStatus == null) {
+                 if (!isInitializing) {
+                    // Start initialization if not already started
+                    initTextToSpeech()
+                }
                 // Suspend method call until the TTS engine is ready
                 val suspendedCall = Runnable { onMethodCall(call, result) }
                 pendingMethodCalls.add(suspendedCall)
@@ -386,6 +394,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             "getSpeechRateValidRange" -> getSpeechRateValidRange(result)
             "getEngines" -> getEngines(result)
             "getDefaultEngine" -> getDefaultEngine(result)
+            "getCurrentEngine" -> getCurrentEngine(result)
             "getDefaultVoice" -> getDefaultVoice(result)
             "setVoice" -> {
                 val voice: HashMap<String?, String>? = call.arguments()
@@ -570,6 +579,14 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private fun getDefaultEngine(result: Result) {
         val defaultEngine: String? = tts!!.defaultEngine
         result.success(defaultEngine)
+    }
+
+    private fun getCurrentEngine(result: Result) {
+        if (currentEngine != null) {
+            result.success(currentEngine)
+            return
+        }
+        return getDefaultEngine(result)
     }
 
     private fun getDefaultVoice(result: Result) {
