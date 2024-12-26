@@ -9,8 +9,6 @@ public class SwiftFlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizer
   final var iosAudioModeKey = "iosAudioModeKey"
 
   var synthesizer = AVSpeechSynthesizer()
-  var language: String = AVSpeechSynthesisVoice.currentLanguageCode()
-  var languages = Set<String>()
   var volume: Float = 1.0
   var pitch: Float = 1.0
   var rate: Float = AVSpeechUtteranceDefaultSpeechRate
@@ -20,25 +18,20 @@ public class SwiftFlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizer
   var autoStopSharedSession: Bool = true
   var speakResult: FlutterResult? = nil
   var synthResult: FlutterResult? = nil
-    
+  lazy var audioSession = AVAudioSession.sharedInstance()
+  lazy var language: String = {
+    AVSpeechSynthesisVoice.currentLanguageCode()
+  }()
+  lazy var languages: Set<String> = {
+    Set(AVSpeechSynthesisVoice.speechVoices().map(\.language))
+  }()
 
-
-    
 
   var channel = FlutterMethodChannel()
-  lazy var audioSession = AVAudioSession.sharedInstance()
   init(channel: FlutterMethodChannel) {
     super.init()
     self.channel = channel
     synthesizer.delegate = self
-    setLanguages()
-  }
-
-  private func setLanguages() {
-    let speechVoices = AVSpeechSynthesisVoice.speechVoices()
-    for voice in speechVoices {
-      self.languages.insert(voice.language)
-    }
   }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
@@ -188,7 +181,6 @@ public class SwiftFlutterTtsPlugin: NSObject, FlutterPlugin, AVSpeechSynthesizer
                         bufferFormatSettings[AVLinearPCMIsBigEndianKey] = false
                         bufferFormatSettings[AVLinearPCMIsFloatKey] = false
                         bufferFormatSettings[AVLinearPCMBitDepthKey] = 16
-                        //print("originalBufferFormat: " + pcmBuffer.format.settings.description + "modifiedBufferFormatSettings: " + bufferFormatSettings.description)
                         output = try AVAudioFile(forWriting: fileURL, settings: bufferFormatSettings, commonFormat: pcmBuffer.format.commonFormat, interleaved: false)
                         
                     } catch {
