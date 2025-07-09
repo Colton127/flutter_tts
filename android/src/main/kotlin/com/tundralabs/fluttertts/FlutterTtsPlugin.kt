@@ -213,35 +213,35 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             @Deprecated("")
             override fun onError(utteranceId: String) {
                 if (utteranceId.startsWith(SYNTHESIZE_TO_FILE_PREFIX)) {
-                    if (synthesizing) synthCompletion(0)
+                    if (synthesizing) synthCompletion(-1)
                     invokeMethod("synth.onError", "Error from TextToSpeech (synth)")
                 } else {
-                    if (speaking) speakCompletion(0)
+                    if (speaking) speakCompletion(-1)
                     invokeMethod("speak.onError", "Error from TextToSpeech (speak)")
                 }
             }
 
             override fun onError(utteranceId: String, errorCode: Int) {
                 if (utteranceId.startsWith(SYNTHESIZE_TO_FILE_PREFIX)) {
-                    if (synthesizing) synthCompletion(0)
+                    if (synthesizing) synthCompletion(errorCode)
                     invokeMethod("synth.onError", "Error from TextToSpeech (synth) - $errorCode")
                 } else {
-                    if (speaking) speakCompletion(0)
+                    if (speaking) speakCompletion(errorCode)
                     invokeMethod("speak.onError", "Error from TextToSpeech (speak) - $errorCode")
                 }
             }
         }
 
-    fun speakCompletion(success: Int) {
+    fun speakCompletion(result: Int) {
         handler!!.post {
-            speakResult?.success(success)
+            speakResult?.success(result)
             speakResult = null
         }
     }
 
-    fun synthCompletion(success: Int) {
+    fun synthCompletion(result: Int) {
         handler!!.post {
-            synthResult?.success(success)
+            synthResult?.success(result)
             synthResult = null
         }
     }
@@ -529,6 +529,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         try {
             for (voice in tts!!.voices) {
                 val voiceMap = HashMap<String, String>()
+                voiceMap["features"] = voice.features.toString()
                 voiceMap["name"] = voice.name
                 voiceMap["locale"] = voice.locale.toLanguageTag()
                 voices.add(voiceMap)
