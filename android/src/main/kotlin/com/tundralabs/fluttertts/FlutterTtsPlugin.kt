@@ -529,7 +529,6 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         try {
             for (voice in tts!!.voices) {
                 val voiceMap = HashMap<String, String>()
-                voiceMap["features"] = voice.features.toString()
                 voiceMap["name"] = voice.name
                 voiceMap["locale"] = voice.locale.toLanguageTag()
                 voices.add(voiceMap)
@@ -599,6 +598,8 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         }
         result.success(voice)
     }
+
+
 
     private fun getSpeechRateValidRange(result: Result) {
         // Valid values available in the android documentation.
