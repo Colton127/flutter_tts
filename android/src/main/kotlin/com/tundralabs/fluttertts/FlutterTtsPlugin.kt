@@ -232,19 +232,27 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             }
         }
 
-    fun speakCompletion(result: Int) {
+fun speakCompletion(result: Int) {
+    val resultToComplete = speakResult
+    if (resultToComplete != null) {
+        speakResult = null
         handler!!.post {
-            speakResult?.success(result)
-            speakResult = null
+            resultToComplete.success(result)
         }
     }
+}
 
-    fun synthCompletion(result: Int) {
+fun synthCompletion(result: Int) {
+    val resultToComplete = synthResult
+    if (resultToComplete != null) {
+        synthResult = null
         handler!!.post {
-            synthResult?.success(result)
-            synthResult = null
+            resultToComplete.success(result)
         }
     }
+}
+
+
     fun engineCompletion(success: Int, error: String? = null) {
         if (engineResult != null) {
                 if (error != null) { 
