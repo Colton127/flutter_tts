@@ -598,17 +598,18 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 result.success(locales)
             }
 
-            private fun getEngines(result: Result) {
-                val engines = ArrayList<String>()
-                try {
-                    for (engineInfo in tts!!.engines) {
-                        engines.add(engineInfo.name)
-                    }
-                } catch (e: Exception) {
-                    Log.d(tag, "getEngines: " + e.message)
-                }
-                result.success(engines)
+
+    private fun getEngines(result: Result) {
+        val engines = ArrayList<HashMap<String, String>>()
+        try {
+            for (engineInfo in tts!!.engines) {
+                engines.add(hashMapOf("name" to engineInfo.name, "label" to engineInfo.label))
             }
+        } catch (e: Exception) {
+            Log.d(tag, "getEngines: " + e.message)
+        }
+        result.success(engines)
+    }
 
             private fun getDefaultEngine(result: Result) {
                 val defaultEngine: String? = tts!!.defaultEngine
@@ -685,6 +686,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                     TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID,
                     utteranceId
                 )
+
                 val file = File(fileName)
                 fullPath = file.path
 

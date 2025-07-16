@@ -18,7 +18,7 @@ class TTSVoice {
   String toString() => 'TTSVoice{locale: $locale, name: $name}';
 }
 
-void main() => runApp(MyApp());
+void main() => runApp(MaterialApp(home: MyApp()));
 
 class MyApp extends StatefulWidget {
   @override
@@ -154,8 +154,13 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
-  Future<void> _speak() async {
-    await _synthesizeToFile(_newVoiceText!);
+  Future<void> _speak([String? text]) async {
+    final result = await _synthesizeToFile(text ?? _newVoiceText!);
+    if (result != 1) {
+      print('Error synthesizing text to file: $result');
+      return;
+    }
+
     await audioPlayer.setFilePath(ttsSynthOutputPath);
     await audioPlayer.play();
   }
@@ -180,34 +185,39 @@ class _MyAppState extends State<MyApp> {
     if (result == 1) setState(() => ttsState = TtsState.paused);
   }
 
-  Future<void> _synthesizeToFile(String text) async {
+  Future<dynamic> _synthesizeToFile(String text) async {
     await Future.wait([
       flutterTts.setVolume(volume),
       flutterTts.setSpeechRate(rate),
       flutterTts.setPitch(pitch),
     ]);
 
-    await flutterTts.synthesizeToFile(text, ttsSynthOutputPath);
+    return flutterTts.synthesizeToFile(text, ttsSynthOutputPath);
     // await audioPlayer.setFilePath(ttsSynthOutput);
     // await audioPlayer.play();
   }
 
   Future<void> _synthLoop() async {
     int iterations = 100;
-    final stopwatch = Stopwatch()..start();
-    for (var i = 1; i <= iterations; i++) {
-      int begin = stopwatch.elapsedMilliseconds;
-      final voice = ttsVoices[i % ttsVoices.length];
-      await flutterTts.setVoice({"name": voice.name, "locale": voice.locale});
-      await _synthesizeToFile('h');
-      print('synthLoop i $i / $iterations. Voice: ${voice}. Elapsed: ${stopwatch.elapsedMilliseconds - begin} ms');
 
-      if (i % 10 == 0) {
-        final average = stopwatch.elapsedMilliseconds / i;
-        print('synthLoop i $i. Average: $average ms');
-      }
+    for (var i = 1; i <= iterations; i++) {
+      _speak(i.toString());
     }
-    stopwatch.stop();
+
+    // final stopwatch = Stopwatch()..start();
+    // for (var i = 1; i <= iterations; i++) {
+    //   int begin = stopwatch.elapsedMilliseconds;
+    //   final voice = ttsVoices[i % ttsVoices.length];
+    //   await flutterTts.setVoice({"name": voice.name, "locale": voice.locale});
+    //   await _synthesizeToFile('h');
+    //   print('synthLoop i $i / $iterations. Voice: $voice. Elapsed: ${stopwatch.elapsedMilliseconds - begin} ms');
+
+    //   if (i % 10 == 0) {
+    //     final average = stopwatch.elapsedMilliseconds / i;
+    //     print('synthLoop i $i. Average: $average ms');
+    //   }
+    // }
+    // stopwatch.stop();
   }
 
   Future<void> _randomizeVars() async {
@@ -223,10 +233,17 @@ class _MyAppState extends State<MyApp> {
     flutterTts.stop();
   }
 
+  // List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<dynamic> engines) {
+  //   var items = <DropdownMenuItem<String>>[];
+  //   for (dynamic type in engines) {
+  //     items.add(DropdownMenuItem(value: type as String?, child: Text((type as String))));
+  //   }
+  //   return items;
+  // }
   List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<dynamic> engines) {
     var items = <DropdownMenuItem<String>>[];
     for (dynamic type in engines) {
-      items.add(DropdownMenuItem(value: type as String?, child: Text((type as String))));
+      items.add(DropdownMenuItem(value: type['name'] as String?, child: Text((type['label'] as String))));
     }
     return items;
   }
@@ -265,23 +282,21 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: Text('Flutter TTS - MemleakFix'),
-        ),
-        body: SingleChildScrollView(
-          scrollDirection: Axis.vertical,
-          child: Column(
-            children: [
-              _inputSection(),
-              _btnSection(),
-              _engineSection(),
-              _futureBuilder(),
-              _buildSliders(),
-              if (isAndroid) _getMaxSpeechInputLengthSection(),
-            ],
-          ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Flutter TTS - MemleakFix'),
+      ),
+      body: SingleChildScrollView(
+        scrollDirection: Axis.vertical,
+        child: Column(
+          children: [
+            _inputSection(),
+            _btnSection(),
+            _engineSection(),
+            _futureBuilder(),
+            _buildSliders(),
+            if (isAndroid) _getMaxSpeechInputLengthSection(),
+          ],
         ),
       ),
     );
