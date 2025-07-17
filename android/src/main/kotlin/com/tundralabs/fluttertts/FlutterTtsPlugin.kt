@@ -250,16 +250,6 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 }
             }
 
-            fun synthCompletion(result: Int) {
-                val resultToComplete = synthResult
-                if (resultToComplete != null) {
-                    synthResult = null
-                    synthUtteranceId = null
-                    handler!!.post {
-                        resultToComplete.success(result)
-                    }
-                }
-            }
 
     fun synthCompletion(result: Int, utteranceId: String? = null): Boolean {
         val resultToComplete = synthResult
@@ -283,14 +273,15 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
 
             fun engineCompletion(success: Int, error: String? = null) {
-                if (engineResult != null) {
-                    if (error != null) {
-                        engineResult?.error("EngineError", error, null)
-                    } else {
-                        engineResult?.success(success)
-                    }
+                val resultToComplete = engineResult
+                if (resultToComplete != null) {
                     engineResult = null
-                }
+                    if (error != null) {
+                        resultToComplete.error("EngineError", error, null)
+                    } else {
+                        resultToComplete.success(success)
+                    }
+   }
             }
 
 
@@ -558,21 +549,21 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 }
             }
 
-            private fun getVoices(result: Result) {
-                val voices = ArrayList<HashMap<String, String>>()
-                try {
-                    for (voice in tts!!.voices) {
-                        val voiceMap = HashMap<String, String>()
-                        voiceMap["name"] = voice.name
-                        voiceMap["locale"] = voice.locale.toLanguageTag()
-                        voices.add(voiceMap)
-                    }
-                    result.success(voices)
-                } catch (e: NullPointerException) {
-                    Log.d(tag, "getVoices: " + e.message)
-                    result.success(null)
-                }
+    private fun getVoices(result: Result) {
+        val voices = ArrayList<HashMap<String, String>>()
+        try {
+            for (voice in tts!!.voices) {
+                voices.add(hashMapOf("name" to voice.name, "locale" to voice.locale.toLanguageTag()))
             }
+            result.success(voices)
+        } catch (e: NullPointerException) {
+            Log.d(tag, "getVoices: " + e.message)
+            result.error(
+                "GET_VOICES_ERROR", // A unique error code
+                "Failed to retrieve TTS voices.", // A human-readable message
+                e.message)
+        }
+    }
 
             private fun getLanguages(result: Result) {
                 val locales = ArrayList<String>()
@@ -605,10 +596,15 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             for (engineInfo in tts!!.engines) {
                 engines.add(hashMapOf("name" to engineInfo.name, "label" to engineInfo.label))
             }
+            result.success(engines)
         } catch (e: Exception) {
             Log.d(tag, "getEngines: " + e.message)
+            result.error(
+                "GET_ENGINES_ERROR",
+                "Failed to retrieve TTS engines.",
+                e.message)
+
         }
-        result.success(engines)
     }
 
             private fun getDefaultEngine(result: Result) {
