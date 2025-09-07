@@ -1,5 +1,47 @@
 # ChangeLog
 
+## 4.0.2
+
+### Fixes
+
+- **Package:** using recommended static analysis and fixing issues from analyze
+- **Package:** Upating android example to use declarative plugins block
+
+## 4.0.1
+
+### Fixes
+
+- **Android:** Fixing synthesizeToFile
+
+## 4.0.0
+
+### Features
+
+- **iOS:** Add clear selected voice
+- **Android:** Add clear selected voice
+- **Android:** Upgrade to Kotlin 1.9.10
+- **Android:** Upgrade Gradle to 8.2.0
+- **Android:** Change compileSDK target to 34
+
+### Fixes
+
+- **Android:** Fix TTS initialization (removed setInitHandler)
+- **Web:** Fix pause
+- **Package:** Fix describeEnum deprecation (requires Flutter SDK >=2.15.0)
+- **Package:** Remove unnecessary foundation.dart include
+
+## 3.8.5
+
+### Fixes
+
+- **iOS:** Fix AVSpeechSynthesisVoiceGender with available on iOS 13 or greater
+
+## 3.8.4
+
+- **Android:** Fix 'Reply already submitted' bug
+- **iOS:** Return additional voice information fields (quality, gender, and identifier)
+- **iOS:** Fix synthesizeToFile on iOS 17+
+
 ## 3.8.3
 
 ### Fixes

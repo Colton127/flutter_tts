@@ -1,11 +1,24 @@
 import 'dart:async';
 import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:math';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
-void main() => runApp(MyApp());
+class TTSVoice {
+  final String locale;
+  final String name;
+  TTSVoice(this.locale, this.name);
+
+  @override
+  String toString() => 'TTSVoice{locale: $locale, name: $name}';
+}
+
+void main() => runApp(MaterialApp(home: MyApp()));
 
 class MyApp extends StatefulWidget {
   @override
@@ -15,7 +28,12 @@ class MyApp extends StatefulWidget {
 enum TtsState { playing, stopped, paused, continued }
 
 class _MyAppState extends State<MyApp> {
+  final r = Random();
+  late final List<TTSVoice> ttsVoices;
   late FlutterTts flutterTts;
+  final audioPlayer = AudioPlayer();
+  late String ttsSynthOutputPath;
+  final String ttsSynthOutputFileName = 'tts.caf';
   String? language;
   String? engine;
   double volume = 0.5;
@@ -23,20 +41,51 @@ class _MyAppState extends State<MyApp> {
   double rate = 0.5;
   bool isCurrentLanguageInstalled = false;
 
-  String? _newVoiceText;
+  String? _newVoiceText = 'Hello, how are you? I am Flutter TTS. I am a text-to-speech plugin for Flutter. I support Web, Android, iOS, and Windows.';
+  late final _textController = TextEditingController(text: _newVoiceText);
   int? _inputLength;
 
   TtsState ttsState = TtsState.stopped;
 
-  get isPlaying => ttsState == TtsState.playing;
-  get isStopped => ttsState == TtsState.stopped;
-  get isPaused => ttsState == TtsState.paused;
-  get isContinued => ttsState == TtsState.continued;
+  bool get isPlaying => ttsState == TtsState.playing;
+  bool get isStopped => ttsState == TtsState.stopped;
+  bool get isPaused => ttsState == TtsState.paused;
+  bool get isContinued => ttsState == TtsState.continued;
 
   bool get isIOS => !kIsWeb && Platform.isIOS;
   bool get isAndroid => !kIsWeb && Platform.isAndroid;
   bool get isWindows => !kIsWeb && Platform.isWindows;
   bool get isWeb => kIsWeb;
+
+  Future<List<TTSVoice>> getTtsVoiceList() async {
+    if (Platform.isAndroid) {
+      final currentEngine = await flutterTts.getCurrentEngine;
+      print('Current TTS Engine: $currentEngine');
+    }
+
+    final speechRateValidRange = await flutterTts.getSpeechRateValidRange;
+    print('Speech Rate Valid Range: min: ${speechRateValidRange.min}, max: ${speechRateValidRange.max}, normal: ${speechRateValidRange.normal}');
+
+    final List<TTSVoice> ttsVoiceList = [];
+    final voiceData = await flutterTts.getVoices as List<dynamic>;
+    for (final voice in voiceData) {
+      if (!_isSupportediOSTtsVoice(voice['identifier'] as String?)) continue;
+      final String? locale = voice['locale'] as String?;
+      final String? name = voice['name'] as String?;
+      final features = voice['features'] as String?;
+      ttsVoiceList.add(TTSVoice(locale!, name!));
+      print('TTSVoice: $locale, $name, $features');
+    }
+    print('Loaded ${ttsVoiceList.length} voices');
+    return ttsVoiceList;
+  }
+
+  static bool _isSupportediOSTtsVoice(String? identifier) {
+    if (identifier == null) return true;
+    if (identifier.contains('speech.synthesis')) return false;
+    if (identifier.contains('eloquence')) return false;
+    return true;
+  }
 
   @override
   initState() {
@@ -44,11 +93,10 @@ class _MyAppState extends State<MyApp> {
     initTts();
   }
 
-  initTts() {
+  dynamic initTts() {
     flutterTts = FlutterTts();
 
     _setAwaitOptions();
-
     if (isAndroid) {
       _getDefaultEngine();
       _getDefaultVoice();
@@ -60,14 +108,6 @@ class _MyAppState extends State<MyApp> {
         ttsState = TtsState.playing;
       });
     });
-
-    if (isAndroid) {
-      flutterTts.setInitHandler(() {
-        setState(() {
-          print("TTS Initialized");
-        });
-      });
-    }
 
     flutterTts.setCompletionHandler(() {
       setState(() {
@@ -107,46 +147,98 @@ class _MyAppState extends State<MyApp> {
 
   Future<dynamic> _getLanguages() async => await flutterTts.getLanguages;
 
-  Future<dynamic> _getEngines() async => await flutterTts.getEngines;
+  Future<dynamic> _getEngines() async {
+    final result = await flutterTts.getEngines;
+    return result;
+  }
 
-  Future _getDefaultEngine() async {
+  Future<void> _getDefaultEngine() async {
     var engine = await flutterTts.getDefaultEngine;
     if (engine != null) {
       print(engine);
     }
   }
 
-  Future _getDefaultVoice() async {
+  Future<void> _getDefaultVoice() async {
     var voice = await flutterTts.getDefaultVoice;
     if (voice != null) {
       print(voice);
     }
   }
 
-  Future _speak() async {
-    await flutterTts.setVolume(volume);
-    await flutterTts.setSpeechRate(rate);
-    await flutterTts.setPitch(pitch);
-
-    if (_newVoiceText != null) {
-      if (_newVoiceText!.isNotEmpty) {
-        await flutterTts.speak(_newVoiceText!);
-      }
+  Future<void> _speak([String? text]) async {
+    final result = await _synthesizeToFile(text ?? _newVoiceText!);
+    if (result != 1) {
+      print('Error synthesizing text to file: $result');
+      return;
     }
+
+    await audioPlayer.setFilePath(ttsSynthOutputPath);
+    await audioPlayer.play();
   }
 
-  Future _setAwaitOptions() async {
+  Future<void> _setAwaitOptions() async {
+    ttsVoices = await getTtsVoiceList();
+    final appDocDir = await getApplicationDocumentsDirectory();
+    ttsSynthOutputPath = p.join(appDocDir.path, Platform.isIOS ? 'tts.caf' : 'tts.wav');
     await flutterTts.awaitSpeakCompletion(true);
+    await flutterTts.awaitSynthCompletion(true);
   }
 
-  Future _stop() async {
+  Future<void> _stop() async {
+    audioPlayer.pause();
     var result = await flutterTts.stop();
     if (result == 1) setState(() => ttsState = TtsState.stopped);
   }
 
-  Future _pause() async {
+  Future<void> _pause() async {
+    getTtsVoiceList();
+
+    audioPlayer.pause();
     var result = await flutterTts.pause();
     if (result == 1) setState(() => ttsState = TtsState.paused);
+  }
+
+  Future<dynamic> _synthesizeToFile(String text) async {
+    await Future.wait([
+      flutterTts.setVolume(volume),
+      flutterTts.setSpeechRate(rate),
+      flutterTts.setPitch(pitch),
+    ]);
+
+    return flutterTts.synthesizeToFile(text, ttsSynthOutputPath);
+    // await audioPlayer.setFilePath(ttsSynthOutput);
+    // await audioPlayer.play();
+  }
+
+  Future<void> _synthLoop() async {
+    int iterations = 100;
+
+    for (var i = 1; i <= iterations; i++) {
+      _speak(i.toString());
+    }
+
+    // final stopwatch = Stopwatch()..start();
+    // for (var i = 1; i <= iterations; i++) {
+    //   int begin = stopwatch.elapsedMilliseconds;
+    //   final voice = ttsVoices[i % ttsVoices.length];
+    //   await flutterTts.setVoice({"name": voice.name, "locale": voice.locale});
+    //   await _synthesizeToFile('h');
+    //   print('synthLoop i $i / $iterations. Voice: $voice. Elapsed: ${stopwatch.elapsedMilliseconds - begin} ms');
+
+    //   if (i % 10 == 0) {
+    //     final average = stopwatch.elapsedMilliseconds / i;
+    //     print('synthLoop i $i. Average: $average ms');
+    //   }
+    // }
+    // stopwatch.stop();
+  }
+
+  Future<void> _randomizeVars() async {
+    volume = r.nextDouble().clamp(0.1, 1.0);
+    rate = r.nextDouble().clamp(0.1, 1.0);
+    pitch = r.nextDouble() + 0.5;
+    setState(() {});
   }
 
   @override
@@ -155,11 +247,17 @@ class _MyAppState extends State<MyApp> {
     flutterTts.stop();
   }
 
-  List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(dynamic engines) {
+  // List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<dynamic> engines) {
+  //   var items = <DropdownMenuItem<String>>[];
+  //   for (dynamic type in engines) {
+  //     items.add(DropdownMenuItem(value: type as String?, child: Text((type as String))));
+  //   }
+  //   return items;
+  // }
+  List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<dynamic> engines) {
     var items = <DropdownMenuItem<String>>[];
     for (dynamic type in engines) {
-      items.add(DropdownMenuItem(
-          value: type as String?, child: Text(type as String)));
+      items.add(DropdownMenuItem(value: type['name'] as String?, child: Text((type['label'] as String))));
     }
     return items;
   }
@@ -172,12 +270,10 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  List<DropdownMenuItem<String>> getLanguageDropDownMenuItems(
-      dynamic languages) {
+  List<DropdownMenuItem<String>> getLanguageDropDownMenuItems(List<dynamic> languages) {
     var items = <DropdownMenuItem<String>>[];
     for (dynamic type in languages) {
-      items.add(DropdownMenuItem(
-          value: type as String?, child: Text(type as String)));
+      items.add(DropdownMenuItem(value: type as String?, child: Text((type as String))));
     }
     return items;
   }
@@ -187,9 +283,7 @@ class _MyAppState extends State<MyApp> {
       language = selectedType;
       flutterTts.setLanguage(language!);
       if (isAndroid) {
-        flutterTts
-            .isLanguageInstalled(language!)
-            .then((value) => isCurrentLanguageInstalled = (value as bool));
+        flutterTts.isLanguageInstalled(language!).then((value) => isCurrentLanguageInstalled = (value as bool));
       }
     });
   }
@@ -202,23 +296,21 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: Text('Flutter TTS'),
-        ),
-        body: SingleChildScrollView(
-          scrollDirection: Axis.vertical,
-          child: Column(
-            children: [
-              _inputSection(),
-              _btnSection(),
-              _engineSection(),
-              _futureBuilder(),
-              _buildSliders(),
-              if (isAndroid) _getMaxSpeechInputLengthSection(),
-            ],
-          ),
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Flutter TTS - MemleakFix'),
+      ),
+      body: SingleChildScrollView(
+        scrollDirection: Axis.vertical,
+        child: Column(
+          children: [
+            _inputSection(),
+            _btnSection(),
+            _engineSection(),
+            _futureBuilder(),
+            _buildSliders(),
+            if (isAndroid) _getMaxSpeechInputLengthSection(),
+          ],
         ),
       ),
     );
@@ -230,9 +322,9 @@ class _MyAppState extends State<MyApp> {
           future: _getEngines(),
           builder: (BuildContext context, AsyncSnapshot<dynamic> snapshot) {
             if (snapshot.hasData) {
-              return _enginesDropDownSection(snapshot.data);
+              return _enginesDropDownSection(snapshot.data as List<dynamic>);
             } else if (snapshot.hasError) {
-              return Text('Error loading engines...');
+              return Text('Error loading engines: ${snapshot.error}');
             } else
               return Text('Loading engines...');
           });
@@ -244,7 +336,7 @@ class _MyAppState extends State<MyApp> {
       future: _getLanguages(),
       builder: (BuildContext context, AsyncSnapshot<dynamic> snapshot) {
         if (snapshot.hasData) {
-          return _languageDropDownSection(snapshot.data);
+          return _languageDropDownSection(snapshot.data as List<dynamic>);
         } else if (snapshot.hasError) {
           return Text('Error loading languages...');
         } else
@@ -255,6 +347,7 @@ class _MyAppState extends State<MyApp> {
       alignment: Alignment.topCenter,
       padding: EdgeInsets.only(top: 25.0, left: 25.0, right: 25.0),
       child: TextField(
+        controller: _textController,
         maxLines: 11,
         minLines: 6,
         onChanged: (String value) {
@@ -268,18 +361,16 @@ class _MyAppState extends State<MyApp> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _buildButtonColumn(Colors.green, Colors.greenAccent, Icons.play_arrow,
-              'PLAY', _speak),
-          _buildButtonColumn(
-              Colors.red, Colors.redAccent, Icons.stop, 'STOP', _stop),
-          _buildButtonColumn(
-              Colors.blue, Colors.blueAccent, Icons.pause, 'PAUSE', _pause),
+          _buildButtonColumn(Colors.purple, Colors.greenAccent, Icons.refresh, 'LOOP', _synthLoop),
+          _buildButtonColumn(Colors.green, Colors.greenAccent, Icons.play_arrow, 'PLAY', _speak),
+          _buildButtonColumn(Colors.red, Colors.redAccent, Icons.stop, 'STOP', _stop),
+          _buildButtonColumn(Colors.blue, Colors.blueAccent, Icons.pause, 'PAUSE', _pause),
         ],
       ),
     );
   }
 
-  Widget _enginesDropDownSection(dynamic engines) => Container(
+  Widget _enginesDropDownSection(List<dynamic> engines) => Container(
         padding: EdgeInsets.only(top: 50.0),
         child: DropdownButton(
           value: engine,
@@ -288,7 +379,7 @@ class _MyAppState extends State<MyApp> {
         ),
       );
 
-  Widget _languageDropDownSection(dynamic languages) => Container(
+  Widget _languageDropDownSection(List<dynamic> languages) => Container(
       padding: EdgeInsets.only(top: 10.0),
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         DropdownButton(
@@ -302,25 +393,11 @@ class _MyAppState extends State<MyApp> {
         ),
       ]));
 
-  Column _buildButtonColumn(Color color, Color splashColor, IconData icon,
-      String label, Function func) {
-    return Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-              icon: Icon(icon),
-              color: color,
-              splashColor: splashColor,
-              onPressed: () => func()),
-          Container(
-              margin: const EdgeInsets.only(top: 8.0),
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 12.0,
-                      fontWeight: FontWeight.w400,
-                      color: color)))
-        ]);
+  Column _buildButtonColumn(Color color, Color splashColor, IconData icon, String label, Function func) {
+    return Column(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+      IconButton(icon: Icon(icon), color: color, splashColor: splashColor, onPressed: () => func()),
+      Container(margin: const EdgeInsets.only(top: 8.0), child: Text(label, style: TextStyle(fontSize: 12.0, fontWeight: FontWeight.w400, color: color)))
+    ]);
   }
 
   Widget _getMaxSpeechInputLengthSection() {
