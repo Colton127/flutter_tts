@@ -57,6 +57,8 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private var ttsStatus: Int? = null
     private var engineResult: Result? = null
     private var isInitializing: Boolean = false
+    private val allowedInErrorState = setOf("setEngine", "getEngines", "stop", "isLanguageAvailable", "getCurrentEngine")
+
 
 
     companion object {
@@ -123,7 +125,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
             if (status == TextToSpeech.SUCCESS && tts != null) {
                 tts!!.setOnUtteranceProgressListener(utteranceProgressListener)
-                Log.e(tag, "Successfully initialized TextToSpeech with status: $status")
+                Log.e(tag, "Successfully initialized TextToSpeech engine with status: $status")
                 engineCompletion(1)
             } else {
                 val errorMessage = "Failed to initialize TextToSpeech with status: $status"
@@ -156,10 +158,9 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 if (utteranceId.startsWith(SILENCE_PREFIX)) return
 
                 if (utteranceId.startsWith(SYNTHESIZE_TO_FILE_PREFIX)) {
-                    if (synthCompletion(1, utteranceId)) {
-                        Log.d(tag, "Utterance ID has completed: $utteranceId")
-                        invokeMethod("synth.onComplete", true)
-                    }
+                    Log.d(tag, "Utterance ID has completed: $utteranceId")
+                    synthCompletion(1, utteranceId)
+                    invokeMethod("synth.onComplete", true)
                 } else {
                     Log.d(tag, "Utterance ID has completed: $utteranceId")
                     if (speaking && queueMode == TextToSpeech.QUEUE_FLUSH) {
@@ -299,6 +300,12 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                         return
                     }
                 }
+                if (ttsStatus == TextToSpeech.ERROR && call.method !in allowedInErrorState) {
+                    result.error("EngineError", "TTS engine failed to initialize.",null)
+                    return
+                }
+
+
                 when (call.method) {
                     "speak" -> {
                         var text: String = call.arguments.toString()
@@ -559,8 +566,8 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         } catch (e: NullPointerException) {
             Log.d(tag, "getVoices: " + e.message)
             result.error(
-                "GET_VOICES_ERROR", // A unique error code
-                "Failed to retrieve TTS voices.", // A human-readable message
+                "GET_VOICES_ERROR",
+                "Failed to retrieve TTS voices.",
                 e.message)
         }
     }
@@ -593,14 +600,17 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private fun getEngines(result: Result) {
         val engines = ArrayList<HashMap<String, String>>()
         try {
-            for (engineInfo in tts!!.engines) {
-                engines.add(hashMapOf("name" to engineInfo.name, "label" to engineInfo.label))
+         for (engineInfo in tts!!.engines) {
+                if (engineInfo.name.startsWith("com.samsung") && Build.VERSION.SDK_INT >= 35) {
+                    continue // On Android 15 (API 35) and newer, Samsung blocks its TTS engine from third-party use.
+                }
+               engines.add(hashMapOf("name" to engineInfo.name, "label" to engineInfo.label))
             }
             result.success(engines)
         } catch (e: Exception) {
             Log.d(tag, "getEngines: " + e.message)
             result.error(
-                "GET_ENGINES_ERROR",
+                "EngineError",
                 "Failed to retrieve TTS engines.",
                 e.message)
 
@@ -613,6 +623,10 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             }
 
             private fun getCurrentEngine(result: Result) {
+                if (ttsStatus != TextToSpeech.SUCCESS) {
+                    result.success(null)
+                    return
+                }
                 if (currentEngine != null) {
                     result.success(currentEngine)
                     return
@@ -691,7 +705,8 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 if (result == TextToSpeech.SUCCESS) {
                     Log.d(tag, "Successfully created file : $fullPath")
                 } else {
-                    Log.d(tag, "Failed creating file : $fullPath")
+                    synthCompletion(result, utteranceId) //Error handler isn't called in this instance, so complete manually
+                    Log.d(tag, "Failed creating file (result: $result) : Path: ($fullPath)")
                 }
             }
 

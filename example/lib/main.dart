@@ -58,14 +58,23 @@ class _MyAppState extends State<MyApp> {
   bool get isWeb => kIsWeb;
 
   Future<List<TTSVoice>> getTtsVoiceList() async {
+    if (Platform.isAndroid) {
+      final currentEngine = await flutterTts.getCurrentEngine;
+      print('Current TTS Engine: $currentEngine');
+    }
+
+    final speechRateValidRange = await flutterTts.getSpeechRateValidRange;
+    print('Speech Rate Valid Range: min: ${speechRateValidRange.min}, max: ${speechRateValidRange.max}, normal: ${speechRateValidRange.normal}');
+
     final List<TTSVoice> ttsVoiceList = [];
     final voiceData = await flutterTts.getVoices as List<dynamic>;
     for (final voice in voiceData) {
       if (!_isSupportediOSTtsVoice(voice['identifier'] as String?)) continue;
       final String? locale = voice['locale'] as String?;
-      if (locale != 'en-US') continue;
       final String? name = voice['name'] as String?;
+      final features = voice['features'] as String?;
       ttsVoiceList.add(TTSVoice(locale!, name!));
+      print('TTSVoice: $locale, $name, $features');
     }
     print('Loaded ${ttsVoiceList.length} voices');
     return ttsVoiceList;
@@ -138,7 +147,10 @@ class _MyAppState extends State<MyApp> {
 
   Future<dynamic> _getLanguages() async => await flutterTts.getLanguages;
 
-  Future<dynamic> _getEngines() async => await flutterTts.getEngines;
+  Future<dynamic> _getEngines() async {
+    final result = await flutterTts.getEngines;
+    return result;
+  }
 
   Future<void> _getDefaultEngine() async {
     var engine = await flutterTts.getDefaultEngine;
@@ -180,6 +192,8 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _pause() async {
+    getTtsVoiceList();
+
     audioPlayer.pause();
     var result = await flutterTts.pause();
     if (result == 1) setState(() => ttsState = TtsState.paused);
@@ -310,7 +324,7 @@ class _MyAppState extends State<MyApp> {
             if (snapshot.hasData) {
               return _enginesDropDownSection(snapshot.data as List<dynamic>);
             } else if (snapshot.hasError) {
-              return Text('Error loading engines...');
+              return Text('Error loading engines: ${snapshot.error}');
             } else
               return Text('Loading engines...');
           });
