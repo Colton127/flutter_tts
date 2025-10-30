@@ -18,6 +18,15 @@ class TTSVoice {
   String toString() => 'TTSVoice{locale: $locale, name: $name}';
 }
 
+class TTSEngine {
+  final String id;
+  final String label;
+  TTSEngine(this.id, this.label);
+
+  @override
+  String toString() => 'TTSEngine{id: $id, label: $label}';
+}
+
 void main() => runApp(MaterialApp(home: MyApp()));
 
 class MyApp extends StatefulWidget {
@@ -41,7 +50,7 @@ class _MyAppState extends State<MyApp> {
   double rate = 0.5;
   bool isCurrentLanguageInstalled = false;
 
-  String? _newVoiceText = 'Hello, how are you? I am Flutter TTS. I am a text-to-speech plugin for Flutter. I support Web, Android, iOS, and Windows.';
+  String _newVoiceText = 'Hello, how are you? I am Flutter TTS. I am a text-to-speech plugin for Flutter. I support Web, Android, iOS, and Windows.';
   late final _textController = TextEditingController(text: _newVoiceText);
   int? _inputLength;
 
@@ -147,9 +156,9 @@ class _MyAppState extends State<MyApp> {
 
   Future<dynamic> _getLanguages() async => await flutterTts.getLanguages;
 
-  Future<dynamic> _getEngines() async {
-    final result = await flutterTts.getEngines;
-    return result;
+  Future<List<TTSEngine>> _getEngines() async {
+    final result = await flutterTts.getEngines as List<dynamic>;
+    return result.map((e) => TTSEngine(e['name'] as String, e['label'] as String)).toList();
   }
 
   Future<void> _getDefaultEngine() async {
@@ -167,7 +176,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _speak([String? text]) async {
-    final result = await _synthesizeToFile(text ?? _newVoiceText!);
+    final result = await _synthesizeToFile(text ?? _newVoiceText);
     if (result != 1) {
       print('Error synthesizing text to file: $result');
       return;
@@ -254,12 +263,13 @@ class _MyAppState extends State<MyApp> {
   //   }
   //   return items;
   // }
-  List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<dynamic> engines) {
-    var items = <DropdownMenuItem<String>>[];
-    for (dynamic type in engines) {
-      items.add(DropdownMenuItem(value: type['name'] as String?, child: Text((type['label'] as String))));
-    }
-    return items;
+  List<DropdownMenuItem<String>> getEnginesDropDownMenuItems(List<TTSEngine> engines) {
+    return engines
+        .map((engine) => DropdownMenuItem(
+              value: engine.id,
+              child: Text(engine.label),
+            ))
+        .toList();
   }
 
   void changedEnginesDropDownItem(String? selectedEngine) async {
@@ -310,6 +320,8 @@ class _MyAppState extends State<MyApp> {
             _futureBuilder(),
             _buildSliders(),
             if (isAndroid) _getMaxSpeechInputLengthSection(),
+            if (isAndroid) _setEngineLoop(),
+            _rapidSynthCalls(),
           ],
         ),
       ),
@@ -318,11 +330,11 @@ class _MyAppState extends State<MyApp> {
 
   Widget _engineSection() {
     if (isAndroid) {
-      return FutureBuilder<dynamic>(
+      return FutureBuilder<List<TTSEngine>>(
           future: _getEngines(),
-          builder: (BuildContext context, AsyncSnapshot<dynamic> snapshot) {
+          builder: (BuildContext context, snapshot) {
             if (snapshot.hasData) {
-              return _enginesDropDownSection(snapshot.data as List<dynamic>);
+              return _enginesDropDownSection(snapshot.data!);
             } else if (snapshot.hasError) {
               return Text('Error loading engines: ${snapshot.error}');
             } else
@@ -370,7 +382,7 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  Widget _enginesDropDownSection(List<dynamic> engines) => Container(
+  Widget _enginesDropDownSection(List<TTSEngine> engines) => Container(
         padding: EdgeInsets.only(top: 50.0),
         child: DropdownButton(
           value: engine,
@@ -413,6 +425,49 @@ class _MyAppState extends State<MyApp> {
         ),
         Text("$_inputLength characters"),
       ],
+    );
+  }
+
+  Widget _setEngineLoop() {
+    return ElevatedButton(
+      child: Text('Set Engine Loop'),
+      onPressed: () async {
+        final engines = await _getEngines();
+        for (int i = 0; i < 1000; i++) {
+          final engine = engines[i % engines.length];
+          flutterTts.setEngine(engine.id);
+          print('Set engine to: ${engine.label}');
+        }
+      },
+    );
+  }
+
+  Widget _rapidSynthCalls() {
+    return ElevatedButton(
+      child: Text('Rapid Synth Calls'),
+      onPressed: () async {
+        final voices = await getTtsVoiceList();
+        // final engines = await _getEngines();
+        for (int i = 0; i < 5000; i++) {
+          //  final engine = engines[i % engines.length];
+          // flutterTts.setEngine(engine.id);
+
+          flutterTts.setVolume(volume);
+          flutterTts.setSpeechRate(rate);
+          flutterTts.setPitch(pitch);
+          flutterTts.awaitSynthCompletion(true);
+
+          flutterTts.getCurrentEngine;
+          flutterTts.getDefaultEngine;
+          flutterTts.getVoices;
+          flutterTts.getEngines;
+
+          final ttsVoice = voices[i % voices.length];
+          flutterTts.setVoice({"name": ttsVoice.name, "locale": ttsVoice.locale});
+
+          flutterTts.synthesizeToFile('', ttsSynthOutputPath);
+        }
+      },
     );
   }
 
