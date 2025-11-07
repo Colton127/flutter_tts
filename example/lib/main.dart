@@ -321,6 +321,7 @@ class _MyAppState extends State<MyApp> {
             _buildSliders(),
             if (isAndroid) _getMaxSpeechInputLengthSection(),
             if (isAndroid) _setEngineLoop(),
+            if (isAndroid) _setEngineOnce(),
             _rapidSynthCalls(),
           ],
         ),
@@ -437,6 +438,22 @@ class _MyAppState extends State<MyApp> {
           final engine = engines[i % engines.length];
           flutterTts.setEngine(engine.id);
           print('Set engine to: ${engine.label}');
+        }
+      },
+    );
+  }
+
+  Widget _setEngineOnce() {
+    return ElevatedButton(
+      child: Text('Set Engine Once'),
+      onPressed: () async {
+        try {
+          final engine = (await _getEngines()).first;
+          print('Setting engine to: ${engine.label}');
+          await flutterTts.setEngine(engine.id);
+          print('Engine set to: ${engine.label}');
+        } catch (e) {
+          print('Error setting engine: $e');
         }
       },
     );

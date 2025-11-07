@@ -67,7 +67,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun initInstance(messenger: BinaryMessenger, context: Context) {
-        Log.e(tag, "FlutterTts: initInstance")
+        Log.d(tag, "FlutterTts: initInstance")
         this.context = context
         methodChannel = MethodChannel(messenger, "flutter_tts")
         methodChannel!!.setMethodCallHandler(this)
@@ -83,15 +83,15 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         Log.d(tag, "FlutterTts: onDetachedFromEngine")
+        isInitializing = false
         disposeTextToSpeech()
         context = null
         methodChannel!!.setMethodCallHandler(null)
         methodChannel = null
-        isInitializing = false
     }
 
     private fun initTextToSpeech() {
-        Log.e(tag, "Initalizing TextToSpeech (initTextToSpeech)")
+        Log.d(tag, "Initalizing TextToSpeech (initTextToSpeech)")
         isInitializing = true
         if (tts != null) {
             disposeTextToSpeech()
@@ -105,12 +105,12 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun disposeTextToSpeech() {
-        ttsStatus = null
         isPaused = false
         pauseText = null
         stop()
         tts?.shutdown()
         tts = null
+        ttsStatus = null
     }
 
     private val onInitListener: TextToSpeech.OnInitListener =
@@ -309,6 +309,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 return
             }
         }
+
         if (ttsStatus == TextToSpeech.ERROR && call.method !in allowedInErrorState) {
             result.error("EngineError", "TTS engine failed to initialize.",null)
             return
@@ -373,6 +374,9 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             }
 
             "synthesizeToFile" -> {
+                val text: String = call.argument("text")!!
+                val fileName: String = call.argument("fileName")!!
+
                 if (synthesizing) {
                     stop() // Stop any ongoing synthesis
                 }
@@ -381,9 +385,8 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 } else {
                     result.success(1)
                 }
-                val text: String? = call.argument("text")
-                val fileName: String? = call.argument("fileName")
-                synthesizeToFile(text!!, fileName!!)
+
+                synthesizeToFile(text, fileName)
             }
 
             "pause" -> {
@@ -512,9 +515,15 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun setEngine(engine: String?, result: Result) {
-        currentEngine = engine
         engineResult = result
+
+        try {
+        currentEngine = engine
         initTextToSpeech()
+        } catch (e: Throwable) {
+            Log.e(tag, "An exception occurred in setEngine: " + e.message)
+            engineCompletion(0, "An exception occurred in setEngine: " + e.message)
+        }
     }
 
     private fun setLanguage(language: String?, result: Result) {
@@ -713,8 +722,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             } else {
                 Log.d(tag, "Successfully started synthesis to file : ${file.path}")
             }
-        } catch (e: Exception) {
-            // This is your crucial addition:
+        } catch (e: Throwable) {
             Log.e(tag, "An exception occurred in synthesizeToFile: " + e.message)
             synthCompletion(-1, utteranceId)
         }
