@@ -105,12 +105,16 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun disposeTextToSpeech() {
-        isPaused = false
-        pauseText = null
+        try {
         stop()
         tts?.shutdown()
+        } catch (e: Throwable) {
+            Log.e(tag, "An exception occurred in disposeTextToSpeech: " + e.message)
+        }
         tts = null
         ttsStatus = null
+        isPaused = false
+        pauseText = null
     }
 
     private val onInitListener: TextToSpeech.OnInitListener =
@@ -134,7 +138,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
             if (status == TextToSpeech.SUCCESS && tts != null) {
                 tts!!.setOnUtteranceProgressListener(utteranceProgressListener)
-                Log.e(tag, "Successfully initialized TextToSpeech engine with status: $status")
+                Log.d(tag, "Successfully initialized TextToSpeech engine with status: $status")
                 engineCompletion(1)
             } else {
                 val errorMessage = "Failed to initialize TextToSpeech with status: $status"
@@ -228,6 +232,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 if (utteranceId.startsWith(SYNTHESIZE_TO_FILE_PREFIX)) {
                     // Only invoke the method if the completion was successful.
                     if (synthCompletion(-1, utteranceId)) {
+                        Log.e(tag, "Error from TextToSpeech (synth)")
                         invokeMethod("synth.onError", "Error from TextToSpeech (synth)")
                     }
                 } else {
@@ -240,6 +245,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 if (utteranceId.startsWith(SYNTHESIZE_TO_FILE_PREFIX)) {
                     // Only invoke the method if the completion was successful.
                     if (synthCompletion(errorCode, utteranceId)) {
+                        Log.e(tag, "Error from TextToSpeech (synth) - code $errorCode")
                         invokeMethod("synth.onError", "Error from TextToSpeech (synth) - $errorCode")
                     }
                 } else {
@@ -718,13 +724,13 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
             if (result != TextToSpeech.SUCCESS) {
                 synthCompletion(result, utteranceId)
-                Log.d(tag, "Failed creating file (result: $result) : Path: ${file.path}")
+                Log.e(tag, "Failed creating file (result: $result) : Path: ${file.path}")
             } else {
                 Log.d(tag, "Successfully started synthesis to file : ${file.path}")
             }
         } catch (e: Throwable) {
-            Log.e(tag, "An exception occurred in synthesizeToFile: " + e.message)
             synthCompletion(-1, utteranceId)
+            Log.e(tag, "An exception occurred in synthesizeToFile: " + e.message)
         }
     }
 
