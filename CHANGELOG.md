@@ -4,7 +4,8 @@
 
 ### Fixes
 
-- **Android:** Guard against `TextToSpeech.getVoices()` returning null in `setVoice` and `isLanguageInstalled` to avoid a `NullPointerException`. `getVoices()` returns null while the engine service is rebinding (e.g. after the app is backgrounded/resumed); `setVoice` now reports a retryable `SET_VOICE_ERROR` in that case instead of crashing
+- **Android:** Guard against `TextToSpeech.getVoices()` returning null to avoid a `NullPointerException`. `getVoices()` returns null while the engine service is rebinding (e.g. after the app is backgrounded/resumed). `setVoice` now detects this, re-initializes the engine, and reports a retryable `SET_VOICE_ERROR` instead of crashing
+- **Android:** Persist and automatically re-apply the selected voice, pitch, and speech rate after the TTS engine is re-initialized (these previously reset to engine defaults). The cached voice is cleared on `setEngine`/`clearVoice` since voices are engine-specific
 
 ## 4.0.2
 

@@ -50,6 +50,11 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private var silencems = 0
     private var lastProgress = 0
     private var currentEngine: String? = null
+    // Cached settings so they can be re-applied after the TTS engine is
+    // re-initialized (a new TextToSpeech instance starts at engine defaults).
+    private var selectedVoice: HashMap<String?, String>? = null
+    private var selectedPitch: Float? = null
+    private var selectedRate: Float? = null
     private var currentText: String? = null
     private var pauseText: String? = null
     private var isPaused: Boolean = false
@@ -138,6 +143,13 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
             if (status == TextToSpeech.SUCCESS && tts != null) {
                 tts!!.setOnUtteranceProgressListener(utteranceProgressListener)
+                // Re-apply settings that live on the native engine instance and
+                // would otherwise be lost across re-initialization. Pitch/rate
+                // are plain setters; voice re-apply is null-safe and leaves the
+                // cached value in place if the voice set isn't available yet.
+                selectedRate?.let { tts!!.setSpeechRate(it) }
+                selectedPitch?.let { tts!!.setPitch(it) }
+                selectedVoice?.let { v -> findMatchingVoice(v)?.let { tts!!.voice = it } }
                 Log.d(tag, "Successfully initialized TextToSpeech engine with status: $status")
                 engineCompletion(1)
             } else {
@@ -487,6 +499,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun setSpeechRate(rate: Float) {
+        selectedRate = rate
         tts!!.setSpeechRate(rate)
     }
 
@@ -502,17 +515,32 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         return result
     }
 
+    // getVoices() returns null (or throws on some engines) when the TTS engine
+    // service connection isn't currently bound. Centralize the guarded fetch so
+    // every caller handles the unavailable case the same way.
+    private fun getVoicesOrNull(): Set<Voice>? {
+        return try {
+            tts!!.voices
+        } catch (e: NullPointerException) {
+            Log.d(tag, "getVoicesOrNull: " + e.message)
+            null
+        }
+    }
+
+    // Finds the installed Voice matching the given name/locale, or null if no
+    // match or the voice set is unavailable. Safe to call without crashing.
+    private fun findMatchingVoice(voice: HashMap<String?, String>): Voice? {
+        val voices = getVoicesOrNull() ?: return null
+        return voices.firstOrNull {
+            it.name == voice["name"] && it.locale.toLanguageTag() == voice["locale"]
+        }
+    }
+
     private fun isLanguageInstalled(language: String?): Boolean {
         val locale: Locale = Locale.forLanguageTag(language!!)
         if (isLanguageAvailable(locale)) {
             var voiceToCheck: Voice? = null
-            val voices = try {
-                tts!!.voices
-            } catch (e: NullPointerException) {
-                Log.d(tag, "isLanguageInstalled: " + e.message)
-                null
-            }
-            for (v in voices ?: emptySet()) {
+            for (v in getVoicesOrNull() ?: emptySet()) {
                 if (v.locale == locale && !v.isNetworkConnectionRequired) {
                     voiceToCheck = v
                     break
@@ -531,6 +559,9 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
         try {
         currentEngine = engine
+        // Voices are engine-specific, so a cached voice from the previous engine
+        // must not be re-applied. Pitch/rate are engine-agnostic and kept.
+        selectedVoice = null
         initTextToSpeech()
         } catch (e: Throwable) {
             Log.e(tag, "An exception occurred in setEngine: " + e.message)
@@ -549,22 +580,23 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun setVoice(voice: HashMap<String?, String>, result: Result) {
-        val voices = try {
-            tts!!.voices
-        } catch (e: NullPointerException) {
-            // Some TTS engines throw instead of returning null
-            Log.d(tag, "setVoice: " + e.message)
-            null
-        }
+        val voices = getVoicesOrNull()
         if (voices == null) {
-            // getVoices() returns null when the TTS engine service isn't
-            // currently bound (e.g. it was torn down while backgrounded and is
-            // still rebinding). The voice itself may be valid, so report a
-            // retryable error rather than a misleading "voice not found".
-            Log.d(tag, "setVoice: TTS voices are not available yet")
+            // getVoices() returns null when the TTS engine service isn't bound
+            // (e.g. it was torn down while backgrounded and is still rebinding).
+            // The voice is likely valid, so cache it, rebind the engine, and ask
+            // the caller to retry. Re-initializing resets ttsStatus, so any
+            // following synthesizeToFile/speak call is suspended in
+            // pendingMethodCalls until init completes, at which point the cached
+            // voice/pitch/rate are re-applied.
+            Log.d(tag, "setVoice: TTS voices are not available yet, reinitializing")
+            selectedVoice = voice
+            synchronized(this@FlutterTtsPlugin) {
+                if (!isInitializing) initTextToSpeech()
+            }
             result.error(
                 "SET_VOICE_ERROR",
-                "TTS voices are not available yet. The engine may still be initializing.",
+                "TTS engine is reinitializing. Please retry.",
                 null
             )
             return
@@ -574,6 +606,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                     .toLanguageTag() == voice["locale"]
             ) {
                 tts!!.voice = ttsVoice
+                selectedVoice = voice
                 result.success(1)
                 return
             }
@@ -583,6 +616,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun clearVoice(result: Result) {
+        selectedVoice = null
         tts!!.voice = tts!!.defaultVoice
         result.success(1)
     }
@@ -599,6 +633,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
     private fun setPitch(pitch: Float, result: Result) {
         if (pitch in (0.5f..2.0f)) {
+            selectedPitch = pitch
             tts!!.setPitch(pitch)
             result.success(1)
         } else {
@@ -608,19 +643,20 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun getVoices(result: Result) {
-        val voices = ArrayList<HashMap<String, String>>()
-        try {
-            for (voice in tts!!.voices) {
-                voices.add(hashMapOf("name" to voice.name, "locale" to voice.locale.toLanguageTag()))
-            }
-            result.success(voices)
-        } catch (e: NullPointerException) {
-            Log.d(tag, "getVoices: " + e.message)
+        val ttsVoices = getVoicesOrNull()
+        if (ttsVoices == null) {
+            Log.d(tag, "getVoices: TTS voices are not available")
             result.error(
                 "GET_VOICES_ERROR",
                 "Failed to retrieve TTS voices.",
-                e.message)
+                null)
+            return
         }
+        val voices = ArrayList<HashMap<String, String>>()
+        for (voice in ttsVoices) {
+            voices.add(hashMapOf("name" to voice.name, "locale" to voice.locale.toLanguageTag()))
+        }
+        result.success(voices)
     }
 
     private fun getLanguages(result: Result) {
