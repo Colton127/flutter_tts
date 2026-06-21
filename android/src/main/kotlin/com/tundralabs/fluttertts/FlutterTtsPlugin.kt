@@ -557,8 +557,16 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             null
         }
         if (voices == null) {
-            Log.d(tag, "setVoice: TTS voices are not available")
-            result.success(0)
+            // getVoices() returns null when the TTS engine service isn't
+            // currently bound (e.g. it was torn down while backgrounded and is
+            // still rebinding). The voice itself may be valid, so report a
+            // retryable error rather than a misleading "voice not found".
+            Log.d(tag, "setVoice: TTS voices are not available yet")
+            result.error(
+                "SET_VOICE_ERROR",
+                "TTS voices are not available yet. The engine may still be initializing.",
+                null
+            )
             return
         }
         for (ttsVoice in voices) {

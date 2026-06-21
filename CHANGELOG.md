@@ -4,7 +4,7 @@
 
 ### Fixes
 
-- **Android:** Guard against `TextToSpeech.getVoices()` returning null in `setVoice` and `isLanguageInstalled` to avoid a `NullPointerException` on engines/devices that report no voices
+- **Android:** Guard against `TextToSpeech.getVoices()` returning null in `setVoice` and `isLanguageInstalled` to avoid a `NullPointerException`. `getVoices()` returns null while the engine service is rebinding (e.g. after the app is backgrounded/resumed); `setVoice` now reports a retryable `SET_VOICE_ERROR` in that case instead of crashing
 
 ## 4.0.2
 
