@@ -506,7 +506,13 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         val locale: Locale = Locale.forLanguageTag(language!!)
         if (isLanguageAvailable(locale)) {
             var voiceToCheck: Voice? = null
-            for (v in tts!!.voices) {
+            val voices = try {
+                tts!!.voices
+            } catch (e: NullPointerException) {
+                Log.d(tag, "isLanguageInstalled: " + e.message)
+                null
+            }
+            for (v in voices ?: emptySet()) {
                 if (v.locale == locale && !v.isNetworkConnectionRequired) {
                     voiceToCheck = v
                     break
@@ -543,7 +549,19 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun setVoice(voice: HashMap<String?, String>, result: Result) {
-        for (ttsVoice in tts!!.voices) {
+        val voices = try {
+            tts!!.voices
+        } catch (e: NullPointerException) {
+            // Some TTS engines throw instead of returning null
+            Log.d(tag, "setVoice: " + e.message)
+            null
+        }
+        if (voices == null) {
+            Log.d(tag, "setVoice: TTS voices are not available")
+            result.success(0)
+            return
+        }
+        for (ttsVoice in voices) {
             if (ttsVoice.name == voice["name"] && ttsVoice.locale
                     .toLanguageTag() == voice["locale"]
             ) {

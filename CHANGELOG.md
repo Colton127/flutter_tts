@@ -1,5 +1,11 @@
 # ChangeLog
 
+## Unreleased
+
+### Fixes
+
+- **Android:** Guard against `TextToSpeech.getVoices()` returning null in `setVoice` and `isLanguageInstalled` to avoid a `NullPointerException` on engines/devices that report no voices
+
 ## 4.0.2
 
 ### Fixes
