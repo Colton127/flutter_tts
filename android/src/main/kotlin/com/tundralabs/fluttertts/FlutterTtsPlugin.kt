@@ -82,7 +82,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        Log.d(tag, "FlutterTts: onDetachedFromEngine")
+        Log.w(tag, "FlutterTts: onDetachedFromEngine")
         isInitializing = false
         disposeTextToSpeech()
         context = null
@@ -105,16 +105,31 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun disposeTextToSpeech() {
-        try {
-        stop()
-        tts?.shutdown()
-        } catch (e: Throwable) {
-            Log.e(tag, "An exception occurred in disposeTextToSpeech: " + e.message)
-        }
+        val ttsToDispose = tts
+
         tts = null
         ttsStatus = null
         isPaused = false
         pauseText = null
+        isInitializing = false
+
+        speakCompletion(0)
+        synthCompletion(0)
+
+        if (ttsToDispose != null) {
+            try {
+                ttsToDispose.stop()
+            } catch (e: Throwable) {
+                Log.e(tag, "Error during tts.stop(): ${e.message}")
+            }
+
+            try {
+                ttsToDispose.shutdown()
+                Log.d(tag, "TTS Engine shutdown successfully")
+            } catch (e: Throwable) {
+                Log.e(tag, "Error during tts.shutdown(): ${e.message}")
+            }
+        }
     }
 
     private val onInitListener: TextToSpeech.OnInitListener =
@@ -648,7 +663,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun getCurrentEngine(result: Result) {
-        if (ttsStatus != TextToSpeech.SUCCESS) {
+        if (tts == null) {
             result.success(null)
             return
         }
