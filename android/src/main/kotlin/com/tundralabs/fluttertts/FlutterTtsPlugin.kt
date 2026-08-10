@@ -110,7 +110,9 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
             hasConfigurationError = false
         }
         val onInitListener = TextToSpeech.OnInitListener { status ->
-            handleInitializationResult(generation, status)
+            handler!!.post {
+                handleInitializationResult(generation, status)
+            }
         }
         handler?.postDelayed(
             { handleInitializationTimeout(generation) },
@@ -240,7 +242,8 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                     }
                 }
                 if (Build.VERSION.SDK_INT < 26) {
-                    onProgress(utteranceId, 0, utterances[utteranceId]!!.length)
+                    val text = utterances[utteranceId] ?: return
+                    onProgress(utteranceId, 0, text.length)
                 }
             }
 
@@ -286,12 +289,14 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
             private fun onProgress(utteranceId: String?, startAt: Int, endAt: Int) {
                 if (utteranceId != null && !utteranceId.startsWith(SYNTHESIZE_TO_FILE_PREFIX)) {
-                    val text = utterances[utteranceId]
+                    val text = utterances[utteranceId] ?: return
+                    if (startAt < 0 || endAt < startAt || endAt > text.length) return
+
                     val data = HashMap<String, String?>()
                     data["text"] = text
                     data["start"] = startAt.toString()
                     data["end"] = endAt.toString()
-                    data["word"] = text!!.substring(startAt, endAt)
+                    data["word"] = text.substring(startAt, endAt)
                     invokeMethod("speak.onProgress", data)
                 }
             }
