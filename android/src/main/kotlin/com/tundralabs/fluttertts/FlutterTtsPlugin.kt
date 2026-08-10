@@ -61,6 +61,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private var cachedPitch: Float? = null
     private var cachedSpeechRate: Float? = null
     private var hasConfigurationError: Boolean = false
+    private var initGeneration: Long = 0
     private val allowedInErrorState = setOf("setEngine", "getEngines", "stop", "isLanguageAvailable", "getCurrentEngine", "getVoices", "setVoice", "setSpeechRate", "setPitch")
 
 
@@ -68,6 +69,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     companion object {
         private const val SILENCE_PREFIX = "SIL_"
         private const val SYNTHESIZE_TO_FILE_PREFIX = "STF_"
+        private const val INITIALIZATION_TIMEOUT_MILLIS = 15_000L
     }
 
     private fun initInstance(messenger: BinaryMessenger, context: Context) {
@@ -87,39 +89,54 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         Log.w(tag, "FlutterTts: onDetachedFromEngine")
-        isInitializing = false
         disposeTextToSpeech()
         context = null
         methodChannel!!.setMethodCallHandler(null)
         methodChannel = null
     }
 
+    @Synchronized
     private fun initTextToSpeech() {
         Log.d(tag, "Initalizing TextToSpeech (initTextToSpeech)")
-        isInitializing = true
-        ttsStatus = null
-        hasConfigurationError = false
         if (tts != null) {
             disposeTextToSpeech()
         }
+
+        val generation: Long
+        synchronized(this@FlutterTtsPlugin) {
+            generation = ++initGeneration
+            isInitializing = true
+            ttsStatus = null
+            hasConfigurationError = false
+        }
+        val onInitListener = TextToSpeech.OnInitListener { status ->
+            handleInitializationResult(generation, status)
+        }
+        handler?.postDelayed(
+            { handleInitializationTimeout(generation) },
+            INITIALIZATION_TIMEOUT_MILLIS)
         tts = if (currentEngine != null) {
             TextToSpeech(context, onInitListener, currentEngine)
         } else {
             TextToSpeech(context, onInitListener)
         }
-        
     }
 
     private fun disposeTextToSpeech() {
         val ttsToDispose = tts
 
-        tts = null
-        ttsStatus = null
+        synchronized(this@FlutterTtsPlugin) {
+            ++initGeneration
+            isInitializing = false
+            tts = null
+            ttsStatus = null
+        }
         isPaused = false
         pauseText = null
 
         speakCompletion(0)
         synthCompletion(0)
+        utterances.clear()
 
         if (ttsToDispose != null) {
             try {
@@ -137,46 +154,73 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         }
     }
 
-    private val onInitListener: TextToSpeech.OnInitListener =
-        TextToSpeech.OnInitListener { status ->
+    private fun handleInitializationResult(generation: Long, status: Int) {
+        val callsToProcess: List<Runnable>
+        val errorMessage: String?
+        synchronized(this@FlutterTtsPlugin) {
+            if (generation != initGeneration || !isInitializing) {
+                Log.d(tag, "Ignoring stale TextToSpeech initialization callback")
+                return
+            }
+
             if (status == TextToSpeech.SUCCESS && tts != null) {
                 tts!!.setOnUtteranceProgressListener(utteranceProgressListener)
-                val configurationError = restoreConfiguration()
-                if (configurationError == null) {
-                    val callsToProcess = finishInitialization(TextToSpeech.SUCCESS)
-                    Log.d(tag, "Successfully initialized TextToSpeech engine with status: $status")
-                    engineCompletion(1)
-                    processPendingMethodCalls(callsToProcess)
+                errorMessage = restoreConfiguration()
+                if (errorMessage == null) {
+                    ttsStatus = TextToSpeech.SUCCESS
                 } else {
                     hasConfigurationError = true
-                    val callsToProcess = finishInitialization(TextToSpeech.ERROR)
-                    Log.e(tag, configurationError)
-                    engineCompletion(0, configurationError)
-                    processPendingMethodCalls(callsToProcess)
+                    ttsStatus = TextToSpeech.ERROR
                 }
             } else {
-                val errorMessage = "Failed to initialize TextToSpeech with status: $status"
-                Log.e(tag, errorMessage)
-                val callsToProcess = finishInitialization(status)
-                engineCompletion(0, errorMessage)
-                processPendingMethodCalls(callsToProcess)
+                errorMessage = "Failed to initialize TextToSpeech with status: $status"
+                ttsStatus = status
             }
-        }
 
-    private fun finishInitialization(status: Int): List<Runnable> {
-        val callsToProcess: List<Runnable>
-        synchronized(this@FlutterTtsPlugin) {
-            ttsStatus = status
             isInitializing = false
             callsToProcess = ArrayList(pendingMethodCalls)
             pendingMethodCalls.clear()
         }
-        return callsToProcess
+
+        if (errorMessage == null) {
+            Log.d(tag, "Successfully initialized TextToSpeech engine with status: $status")
+            engineCompletion(1)
+        } else {
+            Log.e(tag, errorMessage)
+            engineCompletion(0, errorMessage)
+        }
+        processPendingMethodCalls(callsToProcess)
+    }
+
+    private fun handleInitializationTimeout(generation: Long) {
+        val errorMessage = "TextToSpeech initialization timed out."
+        val callsToProcess: List<Runnable>
+        synchronized(this@FlutterTtsPlugin) {
+            if (generation != initGeneration || !isInitializing) return
+
+            ++initGeneration
+            ttsStatus = TextToSpeech.ERROR
+            isInitializing = false
+            callsToProcess = ArrayList(pendingMethodCalls)
+            pendingMethodCalls.clear()
+        }
+        Log.e(tag, errorMessage)
+        engineCompletion(0, errorMessage)
+        processPendingMethodCalls(callsToProcess)
     }
 
     private fun processPendingMethodCalls(callsToProcess: List<Runnable>) {
         for (call in callsToProcess) {
             call.run()
+        }
+    }
+
+    private fun createSuspendedMethodCall(call: MethodCall, result: Result) = Runnable {
+        try {
+            onMethodCall(call, result)
+        } catch (e: RuntimeException) {
+            Log.e(tag, "Failed to process pending TTS method call", e)
+            result.error("error", e.message, Log.getStackTraceString(e))
         }
     }
 
@@ -237,6 +281,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 if (isPaused) {
                     invokeMethod("speak.onPause", true)
                 }
+                utterances.remove(utteranceId)
             }
 
             private fun onProgress(utteranceId: String?, startAt: Int, endAt: Int) {
@@ -272,6 +317,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                     if (speaking) speakCompletion(-1)
                     invokeMethod("speak.onError", "Error from TextToSpeech (speak)")
                 }
+                utterances.remove(utteranceId)
             }
 
             override fun onError(utteranceId: String, errorCode: Int) {
@@ -285,6 +331,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                     if (speaking) speakCompletion(errorCode)
                     invokeMethod("speak.onError", "Error from TextToSpeech (speak) - $errorCode")
                 }
+                utterances.remove(utteranceId)
             }
         }
 
@@ -343,7 +390,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                     initTextToSpeech()
                 }
                 // Suspend method call until the TTS engine is ready
-                val suspendedCall = Runnable { onMethodCall(call, result) }
+                val suspendedCall = createSuspendedMethodCall(call, result)
                 pendingMethodCalls.add(suspendedCall)
                 return
             }
@@ -382,7 +429,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 val b = speak(text)
                 if (!b) {
                     synchronized(this@FlutterTtsPlugin) {
-                        val suspendedCall = Runnable { onMethodCall(call, result) }
+                        val suspendedCall = createSuspendedMethodCall(call, result)
                         pendingMethodCalls.add(suspendedCall)
                     }
                     return
@@ -890,18 +937,22 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
     private fun speak(text: String): Boolean {
         val uuid: String = UUID.randomUUID().toString()
-        utterances[uuid] = text
         return if (ismServiceConnectionUsable(tts)) {
-            if (silencems > 0) {
+            utterances[uuid] = text
+            val result = if (silencems > 0) {
                 tts!!.playSilentUtterance(
                     silencems.toLong(),
                     TextToSpeech.QUEUE_FLUSH,
                     SILENCE_PREFIX + uuid
                 )
-                tts!!.speak(text, TextToSpeech.QUEUE_ADD, bundle, uuid) == 0
+                tts!!.speak(text, TextToSpeech.QUEUE_ADD, bundle, uuid)
             } else {
-                tts!!.speak(text, queueMode, bundle, uuid) == 0
+                tts!!.speak(text, queueMode, bundle, uuid)
             }
+            if (result != TextToSpeech.SUCCESS) {
+                utterances.remove(uuid)
+            }
+            result == TextToSpeech.SUCCESS
         } else {
             initTextToSpeech() // Reinitialize TTS
             false
