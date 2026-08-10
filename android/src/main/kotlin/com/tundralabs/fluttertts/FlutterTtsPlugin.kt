@@ -453,8 +453,7 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 val rate: String = call.arguments.toString()
                 // To make the FlutterTts API consistent across platforms,
                 // Android 1.0 is mapped to flutter 0.5.
-                setSpeechRate(rate.toFloat() * 2.0f)
-                result.success(1)
+                setSpeechRate(rate.toFloat() * 2.0f, result)
             }
 
             "setVolume" -> {
@@ -519,9 +518,16 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
     }
 
-    private fun setSpeechRate(rate: Float) {
-        tts!!.setSpeechRate(rate)
-        cachedSpeechRate = rate
+    private fun setSpeechRate(rate: Float, result: Result) {
+        if (tts!!.setSpeechRate(rate) == TextToSpeech.SUCCESS) {
+            cachedSpeechRate = rate
+            result.success(1)
+        } else {
+            result.error(
+                "SET_SPEECH_RATE_ERROR",
+                "Failed to apply the requested TTS speech rate.",
+                null)
+        }
     }
 
     private fun isLanguageAvailable(locale: Locale?): Boolean {
@@ -585,6 +591,18 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
     private fun setVoice(voice: HashMap<String?, String>, result: Result) {
+        if (ttsStatus == TextToSpeech.ERROR && !hasConfigurationError) {
+            cachedVoice = HashMap(voice)
+            if (!isInitializing) {
+                initTextToSpeech()
+            }
+            result.error(
+                "SET_VOICE_ERROR",
+                "TTS engine initialization failed; initialization was restarted.",
+                null)
+            return
+        }
+
         val voices = getVoicesOrNull()
         if (voices == null) {
             cachedVoice = HashMap(voice)
@@ -604,6 +622,11 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
                 if (tts!!.setVoice(ttsVoice) == TextToSpeech.SUCCESS) {
                     cachedVoice = HashMap(voice)
                     if (hasConfigurationError) {
+                        val configurationError = restoreSpeechRateAndPitch(tts!!)
+                        if (configurationError != null) {
+                            result.error("SET_VOICE_ERROR", configurationError, null)
+                            return
+                        }
                         hasConfigurationError = false
                         ttsStatus = TextToSpeech.SUCCESS
                     }
@@ -642,9 +665,15 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
 
     private fun setPitch(pitch: Float, result: Result) {
         if (pitch in (0.5f..2.0f)) {
-            tts!!.setPitch(pitch)
-            cachedPitch = pitch
-            result.success(1)
+            if (tts!!.setPitch(pitch) == TextToSpeech.SUCCESS) {
+                cachedPitch = pitch
+                result.success(1)
+            } else {
+                result.error(
+                    "SET_PITCH_ERROR",
+                    "Failed to apply the requested TTS pitch.",
+                    null)
+            }
         } else {
             Log.d(tag, "Invalid pitch $pitch value - Range is from 0.5 to 2.0")
             result.success(0)
@@ -663,8 +692,10 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     private fun restoreConfiguration(): String? {
         val textToSpeech = tts ?: return "TextToSpeech became unavailable during initialization."
 
-        cachedSpeechRate?.let { textToSpeech.setSpeechRate(it) }
-        cachedPitch?.let { textToSpeech.setPitch(it) }
+        val settingsError = restoreSpeechRateAndPitch(textToSpeech)
+        if (settingsError != null) {
+            return settingsError
+        }
 
         val voiceToRestore = cachedVoice ?: return null
         val voices = getVoicesOrNull()
@@ -679,7 +710,25 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
         return null
     }
 
+    private fun restoreSpeechRateAndPitch(textToSpeech: TextToSpeech): String? {
+        cachedSpeechRate?.let {
+            if (textToSpeech.setSpeechRate(it) != TextToSpeech.SUCCESS) {
+                return "Cached TTS speech rate could not be restored."
+            }
+        }
+        cachedPitch?.let {
+            if (textToSpeech.setPitch(it) != TextToSpeech.SUCCESS) {
+                return "Cached TTS pitch could not be restored."
+            }
+        }
+        return null
+    }
+
     private fun getVoices(result: Result) {
+        if (ttsStatus == TextToSpeech.ERROR && !hasConfigurationError) {
+            result.error("GET_VOICES_ERROR", "TTS engine failed to initialize.", null)
+            return
+        }
         val voices = ArrayList<HashMap<String, String>>()
         val ttsVoices = getVoicesOrNull()
         if (ttsVoices == null) {
