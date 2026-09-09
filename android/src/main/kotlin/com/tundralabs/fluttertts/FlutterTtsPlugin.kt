@@ -917,23 +917,78 @@ class FlutterTtsPlugin : MethodCallHandler, FlutterPlugin {
     }
 
 
-    private fun getEngines(result: Result) {
+    private fun getEngines(result: Result, isRetry: Boolean = false) {
+        // getEngines is allowed while the plugin is in the error state, and the
+        // initialization-timeout path can leave tts == null there. Never dereference
+        // a null instance; treat it like a transient failure and recover once instead.
+        val textToSpeech = tts
+        if (textToSpeech == null) {
+            handleGetEnginesFailure(result, isRetry, "TextToSpeech instance is unavailable.")
+            return
+        }
+
         val engines = ArrayList<HashMap<String, String>>()
         try {
-            for (engineInfo in tts!!.engines) {
+            for (engineInfo in textToSpeech.engines) {
                 if (engineInfo.name.startsWith("com.samsung") && Build.VERSION.SDK_INT >= 35) {
                     continue // On Android 15 (API 35) and newer, Samsung blocks its TTS engine from third-party use.
                 }
                 engines.add(hashMapOf("name" to engineInfo.name, "label" to engineInfo.label))
             }
-            result.success(engines)
         } catch (e: Exception) {
-            Log.d(tag, "getEngines: " + e.message)
+            handleGetEnginesFailure(result, isRetry, e.message)
+            return
+        }
+        if (isRetry) {
+            Log.i(tag, "getEngines retry succeeded")
+        }
+        result.success(engines)
+    }
+
+    /**
+     * Android can expose a TextToSpeech instance whose underlying service is not fully
+     * usable yet, in which case querying the engine list fails inside the framework.
+     * The first failure is treated as potentially transient: TextToSpeech is
+     * reinitialized and getEngines is retried exactly once after initialization
+     * completes (or times out). A second failure surfaces as the usual EngineError.
+     */
+    private fun handleGetEnginesFailure(result: Result, isRetry: Boolean, reason: String?) {
+        if (isRetry) {
+            Log.e(tag, "getEngines retry failed: $reason")
             result.error(
                 "EngineError",
                 "Failed to retrieve TTS engines.",
-                e.message)
+                reason)
+            return
+        }
 
+        Log.w(tag, "getEngines first attempt failed -> reinitializing TextToSpeech and retrying once: $reason")
+        val retryCall = createSuspendedGetEnginesRetry(result)
+        val shouldInitialize: Boolean
+        synchronized(this@FlutterTtsPlugin) {
+            // Queue the retry before (re)starting initialization so it runs from
+            // processPendingMethodCalls once initialization completes or times out.
+            pendingMethodCalls.add(retryCall)
+            shouldInitialize = !isInitializing
+        }
+        if (shouldInitialize) {
+            initTextToSpeech()
+        }
+    }
+
+    private fun createSuspendedGetEnginesRetry(result: Result) = Runnable {
+        try {
+            getEngines(result, isRetry = true)
+        } catch (e: RuntimeException) {
+            Log.e(tag, "Failed to process pending getEngines retry", e)
+            try {
+                result.error(
+                    "EngineError",
+                    "Failed to retrieve TTS engines.",
+                    e.message)
+            } catch (replyException: RuntimeException) {
+                Log.e(tag, "Failed to report pending getEngines retry error", replyException)
+            }
         }
     }
 
